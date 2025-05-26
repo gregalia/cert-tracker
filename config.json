@@ -1,0 +1,6 @@
+{
+  "resolver": "9.9.9.9",
+  "hostnames": [
+    "example.com"
+  ]
+}
