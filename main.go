@@ -16,31 +16,44 @@ import (
 	"time"
 )
 
+const timeout = time.Second * 30
+const interval = time.Minute * 5
+const logLevel = slog.LevelInfo
+const logLocationAt = slog.LevelWarn // add file + line + function to logs
+
 func main() {
-	hostnames := hostnames()
-	DNSServer := dnsServer()
-	logger.Info("configuration", "dnsServer", DNSServer, "hostnames", hostnames)
-	netResolver := resolver(DNSServer)
-	logger.Info("DNS resolver")
-	nameAddressMappings, err := resolve(hostnames, netResolver)
-	if err != nil {
-		logger.Error("cannot resolve IP Addresses", "error", err)
-		os.Exit(1)
-	}
-	if len(nameAddressMappings) == 0 {
-		logger.Error("cannot resolve IP Addresses")
-		os.Exit(1)
-	}
-	logger.Info("got IP addresses", "addresses", nameAddressMappings)
-	for _, mapping := range nameAddressMappings {
-		for _, ipAddress := range mapping.IPAddresses {
-			certificates(mapping.Hostname, ipAddress)
+	logger.Info("start")
+
+	run := func() {
+		hostnames := hostnames()
+		DNSServer := dnsServer()
+		logger.Info("configuration", "dnsServer", DNSServer, "hostnames", hostnames)
+		netResolver := resolver(DNSServer)
+		logger.Info("DNS resolver")
+		nameAddressMappings, err := resolve(hostnames, netResolver)
+		if err != nil {
+			logger.Warn("cannot resolve IP Addresses", "error", err)
+			return
+		}
+		if len(nameAddressMappings) == 0 {
+			logger.Warn("no name: address mappings")
+			return
+		}
+		logger.Info("got IP addresses", "addresses", nameAddressMappings)
+		for _, mapping := range nameAddressMappings {
+			for _, ipAddress := range mapping.IPAddresses {
+				certificates(mapping.Hostname, ipAddress)
+			}
 		}
 	}
-}
 
-const timeout = time.Second * 30
-const logLocationAt = slog.LevelError // add file + line + function to logs
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		run()
+	}
+}
 
 // TODO: Use net URL hostname?
 type hostname string
@@ -58,6 +71,7 @@ type nameAddressMap struct {
 type hexHandler struct {
 	slog.Handler
 }
+
 type locationHandler struct {
 	handler slog.Handler
 }
@@ -89,11 +103,10 @@ func (h *locationHandler) WithGroup(name string) slog.Handler {
 	return &locationHandler{h.handler.WithGroup(name)}
 }
 
+// Replace binary values with hex strings
 func (h *hexHandler) Handle(ctx context.Context, r slog.Record) error {
-	// Clone the record so we can modify it
+	// safe to modify clone
 	r2 := r.Clone()
-
-	// Replace binary values with hex strings
 	r2.Attrs(func(a slog.Attr) bool {
 		if v := a.Value; v.Kind() == slog.KindAny {
 			if b, ok := v.Any().([]byte); ok {
@@ -109,12 +122,15 @@ func (h *hexHandler) Handle(ctx context.Context, r slog.Record) error {
 
 var logger = slog.New(&locationHandler{
 	handler: &hexHandler{
-		Handler: slog.NewJSONHandler(os.Stdout, nil),
+		Handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: logLevel,
+		}),
 	},
 })
 
 func certificates(hostname hostname, ipAddress net.IP) {
 	dialer := &net.Dialer{Timeout: timeout}
+	// TODO: concurrency
 	conn, err := tls.DialWithDialer(
 		dialer,
 		"tcp",
@@ -140,10 +156,10 @@ func certificates(hostname hostname, ipAddress net.IP) {
 }
 
 func logCertDetails(cert *x509.Certificate, index int) {
-	logger.Info("cert info", "index", index)
-
 	v := reflect.ValueOf(*cert)
 	t := v.Type()
+	c := make(map[string]any)
+
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		value := v.Field(i)
@@ -156,11 +172,17 @@ func logCertDetails(cert *x509.Certificate, index int) {
 			continue
 		}
 
-		logger.Info("cert info", field.Name, value.Interface())
+		c["foo"] = "bar"
+		c[field.Name] = value.Interface()
 	}
 	sha256Hash := sha256.Sum256(cert.Raw)
 	sha256HashString := hex.EncodeToString(sha256Hash[:])
-	logger.Info("cert info", "sha256Fingerprint", sha256HashString)
+	c["sha256Fingerprint"] = sha256HashString
+	certType := "intermediate"
+	if index == 0 {
+		certType = "leaf"
+	}
+	logger.Info("certificate", certType, c)
 }
 
 // TODO: Take parameter
@@ -220,23 +242,54 @@ func resolve(hostnames []hostname, resolver *net.Resolver) ([]nameAddressMap, er
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	var results []nameAddressMap
+	mappings := make(chan nameAddressMap, len(hostnames))
+	errors := make(chan error, len(hostnames))
+
 	for _, hostname := range hostnames {
-		ipAddrs, err := resolver.LookupIPAddr(ctx, string(hostname))
-		if err != nil {
-			return nil, err
-		}
-		var addresses []net.IP
-		for _, address := range ipAddrs {
-			addresses = append(addresses, address.IP)
-		}
-		results = append(
-			results,
-			nameAddressMap{
+		go func() {
+			ipAddrs, err := resolver.LookupIPAddr(ctx, string(hostname))
+			if err != nil {
+				errors <- err
+				return
+			}
+			var addresses []net.IP
+			for _, address := range ipAddrs {
+				addresses = append(addresses, address.IP)
+			}
+			mappings <- nameAddressMap{
 				Hostname:    hostname,
 				IPAddresses: addresses,
-			},
-		)
+			}
+		}()
 	}
+
+	var results []nameAddressMap
+	var errs []error
+	for range hostnames {
+		select {
+		case result := <-mappings:
+			results = append(results, result)
+		case err := <-errors:
+			errs = append(errs, err)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	if len(errs) > 0 && len(results) == 0 {
+		logger.Warn(
+			"all DNS lookups failed; logging only first error",
+			"error", errs[0],
+		)
+		if logger.Enabled(context.Background(), slog.LevelDebug) {
+			for _, err := range errs {
+				logger.Debug(
+					"debug logging all DNS lookup errors",
+					"error", err,
+				)
+			}
+		}
+	}
+
 	return results, nil
 }
