@@ -1,0 +1,15 @@
+{
+  "name": "cert-tracker-infrastructure",
+  "engines": {
+    "node": "^22",
+    "npm": "^11"
+  },
+  "dependencies": {
+    "@types/node": "^20.19.0",
+    "aws-cdk": "^2.1018.1",
+    "aws-cdk-lib": "^2.200.1",
+    "constructs": "^10.4.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
