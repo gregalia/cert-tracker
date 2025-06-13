@@ -1,3 +1,3 @@
-module cert-status
+module cert-tracker
 
 go 1.24.2
