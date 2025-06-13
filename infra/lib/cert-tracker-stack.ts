@@ -10,7 +10,7 @@ export class CertTrackerStack extends cdk.Stack {
     super(scope, id, props);
 
     const isProd = this.node.tryGetContext("is-prod");
-    if (!["true", "false"].includes(isProd)) {
+    if (!["true", "false", undefined].includes(isProd)) {
       throw new Error("is-prod context must be 'true' or 'false'");
     }
     const removalPolicy = isProd === "true" ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY;
