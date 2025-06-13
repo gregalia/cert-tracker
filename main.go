@@ -16,8 +16,9 @@ import (
 	"time"
 )
 
+// TODO: put all of these in the config file
 const timeout = time.Second * 30
-const interval = time.Minute * 5
+const interval = time.Minute * 30
 const logLevel = slog.LevelInfo
 const logLocationAt = slog.LevelWarn // add file + line + function to logs
 
@@ -255,6 +256,13 @@ func resolve(hostnames []hostname, resolver *net.Resolver) ([]nameAddressMap, er
 			var addresses []net.IP
 			for _, address := range ipAddrs {
 				addresses = append(addresses, address.IP)
+				ptrs, err := resolver.LookupAddr(ctx, address.String())
+				if err != nil {
+					logger.Warn("reverse lookup error", "addr", address.String())
+				}
+				for _, ptr := range ptrs {
+					logger.Info("reverse DNS lookup", "addr", address.String(), "ptr", ptr)
+				}
 			}
 			mappings <- nameAddressMap{
 				Hostname:    hostname,
