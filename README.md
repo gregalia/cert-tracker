@@ -10,13 +10,13 @@ SSL/TLS certificate monitoring tool that continuously tracks certificate details
 - Dual-stack internet connection
   - Not required, but you'll see errors in the logs
 
-Before we run the app, let's see if we have IPv6 connectivity[^docker-ipv6]:
+Before we run the app, let's see if we have IPv6 connectivity:
 
 ```sh
 ping6 2606:4700:4700::1111
 ```
 
-Create an IPv6 docker network and test:
+Create an IPv6 docker network and test:[^docker-ipv6]
 
 ```sh
 docker network create --ipv6 --subnet=2001:db8:1::/64 ipv6net
