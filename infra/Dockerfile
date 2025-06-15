@@ -2,7 +2,7 @@
 FROM alpine:3.22.0 AS cdk-run
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
-WORKDIR /build
+WORKDIR /cdk
 
 COPY package*.json ./
 
