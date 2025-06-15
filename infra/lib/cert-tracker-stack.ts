@@ -1,8 +1,8 @@
 import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as logs from "aws-cdk-lib/aws-logs";
-import * as ecr from "aws-cdk-lib/aws-ecr";
 import { Construct } from "constructs";
 
 export class CertTrackerStack extends cdk.Stack {
