@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cert-tracker/logger"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -11,7 +12,6 @@ import (
 	"net"
 	"os"
 	"reflect"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -20,27 +20,27 @@ import (
 const timeout = time.Second * 30
 const interval = time.Minute * 30
 const logLevel = slog.LevelInfo
-const logLocationAt = slog.LevelWarn // add file + line + function to logs
+const logTraceLevel = slog.LevelWarn // add file + line + function to logs
 
 func main() {
-	logger.Info("start")
+	log.Info("start")
 
 	run := func() {
 		hostnames := hostnames()
 		DNSServer := dnsServer()
-		logger.Info("configuration", "dnsServer", DNSServer, "hostnames", hostnames)
+		log.Info("configuration", "dnsServer", DNSServer, "hostnames", hostnames)
 		netResolver := resolver(DNSServer)
-		logger.Info("DNS resolver")
+		log.Info("DNS resolver")
 		nameAddressMappings, err := resolve(hostnames, netResolver)
 		if err != nil {
-			logger.Warn("cannot resolve IP Addresses", "error", err)
+			log.Warn("cannot resolve IP Addresses", "error", err)
 			return
 		}
 		if len(nameAddressMappings) == 0 {
-			logger.Warn("no name: address mappings")
+			log.Warn("no name: address mappings")
 			return
 		}
-		logger.Info("got IP addresses", "addresses", nameAddressMappings)
+		log.Info("got IP addresses", "addresses", nameAddressMappings)
 		for _, mapping := range nameAddressMappings {
 			for _, ipAddress := range mapping.IPAddresses {
 				certificates(mapping.Hostname, ipAddress)
@@ -69,66 +69,6 @@ type nameAddressMap struct {
 	IPAddresses []net.IP
 }
 
-type hexHandler struct {
-	slog.Handler
-}
-
-type locationHandler struct {
-	handler slog.Handler
-}
-
-func (h *locationHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.handler.Enabled(ctx, level)
-}
-
-func (h *locationHandler) Handle(ctx context.Context, r slog.Record) error {
-	if r.Level >= logLocationAt {
-		// Skip 3 frames: Handle + log function + user code
-		pc, file, line, ok := runtime.Caller(3)
-		if ok {
-			r.Add(
-				"file", slog.StringValue(file),
-				"line", slog.IntValue(line),
-				"function", slog.StringValue(runtime.FuncForPC(pc).Name()),
-			)
-		}
-	}
-	return h.handler.Handle(ctx, r)
-}
-
-func (h *locationHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &locationHandler{h.handler.WithAttrs(attrs)}
-}
-
-func (h *locationHandler) WithGroup(name string) slog.Handler {
-	return &locationHandler{h.handler.WithGroup(name)}
-}
-
-// Replace binary values with hex strings
-func (h *hexHandler) Handle(ctx context.Context, r slog.Record) error {
-	// safe to modify clone
-	r2 := r.Clone()
-	r2.Attrs(func(a slog.Attr) bool {
-		if v := a.Value; v.Kind() == slog.KindAny {
-			if b, ok := v.Any().([]byte); ok {
-				r2.Add(a.Key, slog.StringValue(hex.EncodeToString(b)))
-				return false
-			}
-		}
-		return true
-	})
-
-	return h.Handler.Handle(ctx, r2)
-}
-
-var logger = slog.New(&locationHandler{
-	handler: &hexHandler{
-		Handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: logLevel,
-		}),
-	},
-})
-
 func certificates(hostname hostname, ipAddress net.IP) {
 	dialer := &net.Dialer{Timeout: timeout}
 	// TODO: concurrency
@@ -141,17 +81,17 @@ func certificates(hostname hostname, ipAddress net.IP) {
 			ServerName:         string(hostname),
 		})
 	if err != nil {
-		logger.Error("connection error", "error", err)
+		log.Error("connection error", "error", err)
 		return
 	}
 	defer conn.Close()
 	state := conn.ConnectionState()
 	if len(state.PeerCertificates) == 0 {
-		logger.Warn("no certificates", "hostname", hostname, "ipAddress", ipAddress)
+		log.Warn("no certificates", "hostname", hostname, "ipAddress", ipAddress)
 		return
 	}
 	for i, cert := range state.PeerCertificates {
-		logger.Info("cert info", "hostname", hostname, "ipAddress", ipAddress)
+		log.Info("cert info", "hostname", hostname, "ipAddress", ipAddress)
 		logCertDetails(cert, i)
 	}
 }
@@ -183,7 +123,7 @@ func logCertDetails(cert *x509.Certificate, index int) {
 	if index == 0 {
 		certType = "leaf"
 	}
-	logger.Info("certificate", certType, c)
+	log.Info("certificate", certType, c)
 }
 
 // TODO: Take parameter
@@ -203,7 +143,7 @@ func parseConfig() (*config, error) {
 func hostnames() []hostname {
 	config, err := parseConfig()
 	if err != nil {
-		logger.Error("cannot get hostnames", "error", err)
+		log.Error("cannot get hostnames", "error", err)
 		os.Exit(1)
 	}
 	return config.Hostnames
@@ -212,12 +152,12 @@ func hostnames() []hostname {
 func dnsServer() net.IP {
 	config, err := parseConfig()
 	if err != nil {
-		logger.Error("cannot get resolver", "error", err)
+		log.Error("cannot get resolver", "error", err)
 		os.Exit(1)
 	}
 	resolver := net.ParseIP(config.Resolver)
 	if resolver == nil {
-		logger.Error("cannot get resolver", "error", err)
+		log.Error("cannot get resolver", "error", err)
 		os.Exit(1)
 	}
 	return resolver
@@ -258,10 +198,10 @@ func resolve(hostnames []hostname, resolver *net.Resolver) ([]nameAddressMap, er
 				addresses = append(addresses, address.IP)
 				ptrs, err := resolver.LookupAddr(ctx, address.String())
 				if err != nil {
-					logger.Warn("reverse lookup error", "addr", address.String())
+					log.Warn("reverse lookup error", "addr", address.String())
 				}
 				for _, ptr := range ptrs {
-					logger.Info("reverse DNS lookup", "addr", address.String(), "ptr", ptr)
+					log.Info("reverse DNS lookup", "addr", address.String(), "ptr", ptr)
 				}
 			}
 			mappings <- nameAddressMap{
@@ -285,13 +225,13 @@ func resolve(hostnames []hostname, resolver *net.Resolver) ([]nameAddressMap, er
 	}
 
 	if len(errs) > 0 && len(results) == 0 {
-		logger.Warn(
+		log.Warn(
 			"all DNS lookups failed; logging only first error",
 			"error", errs[0],
 		)
-		if logger.Enabled(context.Background(), slog.LevelDebug) {
+		if log.Enabled(context.Background(), slog.LevelDebug) {
 			for _, err := range errs {
-				logger.Debug(
+				log.Debug(
 					"debug logging all DNS lookup errors",
 					"error", err,
 				)
@@ -301,3 +241,11 @@ func resolve(hostnames []hostname, resolver *net.Resolver) ([]nameAddressMap, er
 
 	return results, nil
 }
+
+var log = slog.New(&logger.LocationHandler{
+	Handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+	}),
+	LogTraceLevel: logTraceLevel,
+},
+)
