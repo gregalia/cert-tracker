@@ -1,13 +1,13 @@
 package main
 
 import (
+	"cert-tracker/config"
 	"cert-tracker/logger"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"log/slog"
 	"net"
 	"os"
@@ -56,20 +56,13 @@ func main() {
 	}
 }
 
-// TODO: Use net URL hostname?
-type hostname string
-
-type config struct {
-	Resolver  string     `json:"resolver"`
-	Hostnames []hostname `json:"hostnames"`
-}
 
 type nameAddressMap struct {
-	Hostname    hostname
+	Hostname    config.Hostname
 	IPAddresses []net.IP
 }
 
-func certificates(hostname hostname, ipAddress net.IP) {
+func certificates(hostname config.Hostname, ipAddress net.IP) {
 	dialer := &net.Dialer{Timeout: timeout}
 	// TODO: concurrency
 	conn, err := tls.DialWithDialer(
@@ -126,22 +119,9 @@ func logCertDetails(cert *x509.Certificate, index int) {
 	log.Info("certificate", certType, c)
 }
 
-// TODO: Take parameter
-func parseConfig() (*config, error) {
-	file, fileErr := os.ReadFile("config.json")
-	if fileErr != nil {
-		return nil, fileErr
-	}
 
-	var config config
-	if err := json.Unmarshal(file, &config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-func hostnames() []hostname {
-	config, err := parseConfig()
+func hostnames() []config.Hostname {
+	config, err := config.Parse()
 	if err != nil {
 		log.Error("cannot get hostnames", "error", err)
 		os.Exit(1)
@@ -150,7 +130,7 @@ func hostnames() []hostname {
 }
 
 func dnsServer() net.IP {
-	config, err := parseConfig()
+	config, err := config.Parse()
 	if err != nil {
 		log.Error("cannot get resolver", "error", err)
 		os.Exit(1)
@@ -179,7 +159,7 @@ func resolver(dnsServer net.IP) *net.Resolver {
 	}
 }
 
-func resolve(hostnames []hostname, resolver *net.Resolver) ([]nameAddressMap, error) {
+func resolve(hostnames []config.Hostname, resolver *net.Resolver) ([]nameAddressMap, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
