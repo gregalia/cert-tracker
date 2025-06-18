@@ -1,6 +1,8 @@
 {
-  "resolver": "9.9.9.9",
-  "hostnames": [
-    "example.com"
-  ]
+  "dnsResolvers": [ "9.9.9.9", "1.1.1.1", "8.8.8.8" ],
+  "hostnames": [ "example.com" ],
+  "timeout": "30s",
+  "scanInterval": "30m",
+  "logLevel": "INFO",
+  "logAddSource": false
 }
