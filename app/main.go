@@ -1,7 +1,7 @@
 package main
 
 import (
-	"cert-tracker/config"
+	"cert-tracker/cfg"
 	"cert-tracker/logger"
 	"context"
 	"crypto/sha256"
@@ -10,24 +10,25 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net"
-	"os"
 	"reflect"
 	"strings"
 	"time"
 )
 
-// TODO: put all of these in the config file
-const timeout = time.Second * 30
-const interval = time.Minute * 30
-const logLevel = slog.LevelInfo
-const logTraceLevel = slog.LevelWarn // add file + line + function to logs
+var DNSresolvers = cfg.DNSresolvers
+var Hostnames = cfg.Hostnames
+var Timeout = cfg.Timeout
+var ScanInterval = cfg.ScanInterval
+
+var log = logger.Log
 
 func main() {
 	log.Info("start")
 
 	run := func() {
-		hostnames := hostnames()
-		DNSServer := dnsServer()
+		hostnames := Hostnames
+		// TODO: loop through all resolvers
+		DNSServer := DNSresolvers[0]
 		log.Info("configuration", "dnsServer", DNSServer, "hostnames", hostnames)
 		netResolver := resolver(DNSServer)
 		log.Info("DNS resolver")
@@ -49,21 +50,20 @@ func main() {
 	}
 
 	run()
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(time.Duration(ScanInterval))
 	defer ticker.Stop()
 	for range ticker.C {
 		run()
 	}
 }
 
-
 type nameAddressMap struct {
-	Hostname    config.Hostname
+	Hostname    cfg.Hostname
 	IPAddresses []net.IP
 }
 
-func certificates(hostname config.Hostname, ipAddress net.IP) {
-	dialer := &net.Dialer{Timeout: timeout}
+func certificates(hostname cfg.Hostname, ipAddress net.IP) {
+	dialer := &net.Dialer{Timeout: time.Duration(Timeout)}
 	// TODO: concurrency
 	conn, err := tls.DialWithDialer(
 		dialer,
@@ -120,35 +120,12 @@ func logCertDetails(cert *x509.Certificate, index int) {
 }
 
 
-func hostnames() []config.Hostname {
-	config, err := config.Parse()
-	if err != nil {
-		log.Error("cannot get hostnames", "error", err)
-		os.Exit(1)
-	}
-	return config.Hostnames
-}
-
-func dnsServer() net.IP {
-	config, err := config.Parse()
-	if err != nil {
-		log.Error("cannot get resolver", "error", err)
-		os.Exit(1)
-	}
-	resolver := net.ParseIP(config.Resolver)
-	if resolver == nil {
-		log.Error("cannot get resolver", "error", err)
-		os.Exit(1)
-	}
-	return resolver
-}
-
 func resolver(dnsServer net.IP) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			dialer := net.Dialer{
-				Timeout: timeout,
+				Timeout: time.Duration(Timeout),
 			}
 			return dialer.DialContext(
 				ctx,
@@ -159,8 +136,8 @@ func resolver(dnsServer net.IP) *net.Resolver {
 	}
 }
 
-func resolve(hostnames []config.Hostname, resolver *net.Resolver) ([]nameAddressMap, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func resolve(hostnames []cfg.Hostname, resolver *net.Resolver) ([]nameAddressMap, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(Timeout))
 	defer cancel()
 
 	mappings := make(chan nameAddressMap, len(hostnames))
@@ -221,11 +198,3 @@ func resolve(hostnames []config.Hostname, resolver *net.Resolver) ([]nameAddress
 
 	return results, nil
 }
-
-var log = slog.New(&logger.LocationHandler{
-	Handler: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel,
-	}),
-	LogTraceLevel: logTraceLevel,
-},
-)
