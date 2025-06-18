@@ -31,11 +31,11 @@ RUN <<HEREDOC
   go mod download
 HEREDOC
 
-COPY *.go ./
+COPY ./ ./
 RUN <<HEREDOC
   if [ "${CI}" = true ]; then
     echo "BUILD: CI"
-    GOOS=linux GOARCH=arm64 go build 
+    GOOS=linux GOARCH=arm64 go build
   else
     echo "BUILD: DEV"
     go build
