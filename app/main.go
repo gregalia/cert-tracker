@@ -33,7 +33,7 @@ func main() {
 			log.Warn("no name to address mappings")
 			return
 		}
-		log.Info("got IP addresses",
+		log.Info("resolved IP addresses",
 			"addresses", nameAddressMappings,
 		)
 		for _, mapping := range nameAddressMappings {
@@ -52,8 +52,8 @@ func main() {
 }
 
 type nameAddressMap struct {
-	Hostname    cfg.Hostname
-	IPAddresses []net.IP
+	Hostname    cfg.Hostname `json:"hostname"`
+	IPAddresses []net.IP     `json:"ipAddresses"`
 }
 
 func certificates(hostname cfg.Hostname, ipAddress net.IP) {
@@ -103,7 +103,7 @@ func handle(cert *x509.Certificate, index int, hostname cfg.Hostname, ipAddress 
 	sha256Hash := sha256.Sum256(cert.Raw)
 	c["sha256Fingerprint"] = hex.EncodeToString(sha256Hash[:])
 
-	log.Info("certificate",
+	log.Info("certificate scanned",
 		"details", c,
 	)
 }
