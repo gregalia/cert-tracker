@@ -8,10 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"log/slog"
 	"net"
-	"reflect"
-	"strings"
 	"time"
 )
 
@@ -23,25 +20,22 @@ var ScanInterval = cfg.ScanInterval
 var log = logger.Log
 
 func main() {
-	log.Info("start")
-
 	run := func() {
-		hostnames := Hostnames
 		// TODO: loop through all resolvers
-		DNSServer := DNSresolvers[0]
-		log.Info("configuration", "dnsServer", DNSServer, "hostnames", hostnames)
-		netResolver := resolver(DNSServer)
-		log.Info("DNS resolver")
-		nameAddressMappings, err := resolve(hostnames, netResolver)
+		netResolver := resolver(DNSresolvers[0])
+		nameAddressMappings, err := resolve(Hostnames, netResolver)
 		if err != nil {
 			log.Warn("cannot resolve IP Addresses", "error", err)
 			return
 		}
+		// retry on next scan
 		if len(nameAddressMappings) == 0 {
-			log.Warn("no name: address mappings")
+			log.Warn("no name to address mappings")
 			return
 		}
-		log.Info("got IP addresses", "addresses", nameAddressMappings)
+		log.Info("got IP addresses",
+			"addresses", nameAddressMappings,
+		)
 		for _, mapping := range nameAddressMappings {
 			for _, ipAddress := range mapping.IPAddresses {
 				certificates(mapping.Hostname, ipAddress)
@@ -74,51 +68,45 @@ func certificates(hostname cfg.Hostname, ipAddress net.IP) {
 			ServerName:         string(hostname),
 		})
 	if err != nil {
-		log.Error("connection error", "error", err)
+		log.Error("connection error",
+			"error", err,
+		)
 		return
 	}
 	defer conn.Close()
 	state := conn.ConnectionState()
 	if len(state.PeerCertificates) == 0 {
-		log.Warn("no certificates", "hostname", hostname, "ipAddress", ipAddress)
+		log.Warn("no certificates",
+			"hostname", hostname,
+			"ipAddress", ipAddress,
+		)
 		return
 	}
 	for i, cert := range state.PeerCertificates {
-		log.Info("cert info", "hostname", hostname, "ipAddress", ipAddress)
-		logCertDetails(cert, i)
+		handle(cert, i, hostname, ipAddress)
 	}
 }
 
-func logCertDetails(cert *x509.Certificate, index int) {
-	v := reflect.ValueOf(*cert)
-	t := v.Type()
+func handle(cert *x509.Certificate, index int, hostname cfg.Hostname, ipAddress net.IP) {
 	c := make(map[string]any)
 
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		value := v.Field(i)
+	c["hostname"] = hostname
+	c["ipAddress"] = ipAddress
+	c["index"] = index
 
-		// Skip unexported fields
-		// if !field.IsExported() {
-		// 	continue
-		// }
-		if strings.HasPrefix(field.Name, "Raw") {
-			continue
-		}
-
-		c["foo"] = "bar"
-		c[field.Name] = value.Interface()
-	}
-	sha256Hash := sha256.Sum256(cert.Raw)
-	sha256HashString := hex.EncodeToString(sha256Hash[:])
-	c["sha256Fingerprint"] = sha256HashString
-	certType := "intermediate"
 	if index == 0 {
-		certType = "leaf"
+		c["target"] = "leaf"
+	} else {
+		c["target"] = "intermediate"
 	}
-	log.Info("certificate", certType, c)
-}
 
+	sha256Hash := sha256.Sum256(cert.Raw)
+	c["sha256Fingerprint"] = hex.EncodeToString(sha256Hash[:])
+
+	log.Info("certificate",
+		"details", c,
+	)
+}
 
 func resolver(dnsServer net.IP) *net.Resolver {
 	return &net.Resolver{
@@ -155,10 +143,15 @@ func resolve(hostnames []cfg.Hostname, resolver *net.Resolver) ([]nameAddressMap
 				addresses = append(addresses, address.IP)
 				ptrs, err := resolver.LookupAddr(ctx, address.String())
 				if err != nil {
-					log.Warn("reverse lookup error", "addr", address.String())
+					log.Warn("reverse lookup error",
+						"addr", address.String(),
+					)
 				}
 				for _, ptr := range ptrs {
-					log.Info("reverse DNS lookup", "addr", address.String(), "ptr", ptr)
+					log.Info("reverse DNS lookup",
+						"addr", address.String(),
+						"ptr", ptr,
+					)
 				}
 			}
 			mappings <- nameAddressMap{
@@ -186,13 +179,11 @@ func resolve(hostnames []cfg.Hostname, resolver *net.Resolver) ([]nameAddressMap
 			"all DNS lookups failed; logging only first error",
 			"error", errs[0],
 		)
-		if log.Enabled(context.Background(), slog.LevelDebug) {
-			for _, err := range errs {
-				log.Debug(
-					"debug logging all DNS lookup errors",
-					"error", err,
-				)
-			}
+		for _, err := range errs {
+			log.Debug(
+				"debug logging all DNS lookup errors",
+				"error", err,
+			)
 		}
 	}
 
