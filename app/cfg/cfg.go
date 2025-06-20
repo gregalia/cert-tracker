@@ -12,14 +12,6 @@ import (
 
 const configFilePath = "config.json"
 
-var Current Params
-var DNSresolvers []net.IP
-var Hostnames []Hostname
-var Timeout Duration
-var ScanInterval Duration
-var LogLevel slog.Level
-var LogAddSource bool
-
 type Hostname string
 type Duration time.Duration
 type Params struct {
@@ -56,7 +48,7 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-func load(p *Params) error {
+func loadFile(configFilePath string, p *Params) error {
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
@@ -66,24 +58,8 @@ func load(p *Params) error {
 	return err
 }
 
-func init() {
-	configLog := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	err := load(&Current)
-	if err != nil {
-		configLog.Error(
-			"failed to load configuration parameters",
-			"error", err.Error(),
-		)
-		os.Exit(1)
-	}
-	configLog.Info(
-		"configuration parameters loaded",
-		"params", Current,
-	)
-	DNSresolvers = Current.DNSresolvers
-	Hostnames = Current.Hostnames
-	Timeout = Current.Timeout
-	ScanInterval = Current.ScanInterval
-	LogLevel = Current.LogLevel
-	LogAddSource = Current.LogAddSource
+func Load() (Params, error){
+	var Current Params
+	err := loadFile(configFilePath, &Current)
+	return Current, err
 }
