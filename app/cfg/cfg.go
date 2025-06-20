@@ -2,6 +2,7 @@ package cfg
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"os"
@@ -32,6 +33,9 @@ func (h *Hostname) UnmarshalJSON(data []byte) error {
 	validate := validator.New(validator.WithRequiredStructEnabled())
 	if err := validate.Var(s, "hostname_rfc1123"); err != nil {
 		return err
+	}
+	if err := validate.Var(s, "ip"); err == nil {
+		return errors.New("IP address found in config hostnames")
 	}
 
 	*h = Hostname(s)
