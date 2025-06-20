@@ -8,22 +8,22 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"log/slog"
 	"net"
+	"os"
+	"runtime"
 	"time"
 )
 
-var DNSresolvers = cfg.DNSresolvers
-var Hostnames = cfg.Hostnames
-var Timeout = cfg.Timeout
-var ScanInterval = cfg.ScanInterval
-
-var log = logger.Log
+var log *slog.Logger
 
 func main() {
+	config := loadConfig()
 	run := func() {
 		// TODO: loop through all resolvers
-		netResolver := resolver(DNSresolvers[0])
-		nameAddressMappings, err := resolve(Hostnames, netResolver)
+		netResolver := resolver(config.DNSresolvers[0], config.Timeout)
+		// TODO: move logging to called functions to make main more readable
+		nameAddressMappings, err := resolve(config.Hostnames, netResolver, config.Timeout)
 		if err != nil {
 			log.Warn("cannot resolve IP Addresses", "error", err)
 			return
@@ -38,13 +38,13 @@ func main() {
 		)
 		for _, mapping := range nameAddressMappings {
 			for _, ipAddress := range mapping.IPAddresses {
-				certificates(mapping.Hostname, ipAddress)
+				certificates(mapping.Hostname, ipAddress, config.Timeout)
 			}
 		}
 	}
 
 	run()
-	ticker := time.NewTicker(time.Duration(ScanInterval))
+	ticker := time.NewTicker(time.Duration(config.ScanInterval))
 	defer ticker.Stop()
 	for range ticker.C {
 		run()
@@ -56,8 +56,31 @@ type nameAddressMap struct {
 	IPAddresses []net.IP     `json:"ipAddresses"`
 }
 
-func certificates(hostname cfg.Hostname, ipAddress net.IP) {
-	dialer := &net.Dialer{Timeout: time.Duration(Timeout)}
+func loadConfig() cfg.Params {
+	config, err := cfg.Load()
+	if err != nil {
+		// doesn't use config params
+		log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		buf := make([]byte, 4096)
+		n := runtime.Stack(buf, false) // false = current goroutine only
+		stackTrace := string(buf[:n])
+		log.Error(
+			"failed to load configuration parameters",
+			"error", err.Error(),
+			"stackTrace", stackTrace,
+		)
+		os.Exit(1)
+	}
+	log = logger.New(config)
+	log.Info(
+		"application configuration loaded",
+		"config", config,
+	)
+	return config
+}
+
+func certificates(hostname cfg.Hostname, ipAddress net.IP, timeout cfg.Duration) {
+	dialer := &net.Dialer{Timeout: time.Duration(timeout)}
 	// TODO: concurrency
 	conn, err := tls.DialWithDialer(
 		dialer,
@@ -108,12 +131,12 @@ func handle(cert *x509.Certificate, index int, hostname cfg.Hostname, ipAddress 
 	)
 }
 
-func resolver(dnsServer net.IP) *net.Resolver {
+func resolver(dnsServer net.IP, timeout cfg.Duration) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			dialer := net.Dialer{
-				Timeout: time.Duration(Timeout),
+				Timeout: time.Duration(timeout),
 			}
 			return dialer.DialContext(
 				ctx,
@@ -124,8 +147,8 @@ func resolver(dnsServer net.IP) *net.Resolver {
 	}
 }
 
-func resolve(hostnames []cfg.Hostname, resolver *net.Resolver) ([]nameAddressMap, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(Timeout))
+func resolve(hostnames []cfg.Hostname, resolver *net.Resolver, timeout cfg.Duration) ([]nameAddressMap, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout))
 	defer cancel()
 
 	mappings := make(chan nameAddressMap, len(hostnames))
