@@ -1,5 +1,7 @@
 # cert-tracker
 
+[![codecov](https://codecov.io/gh/gregalia/cert-tracker/graph/badge.svg?token=3AYX4VIB3L)](https://codecov.io/gh/gregalia/cert-tracker)
+
 SSL/TLS certificate monitoring tool that continuously tracks certificate details for specified hostnames.
 
 ## Run Locally
